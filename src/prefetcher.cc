@@ -2,7 +2,12 @@
  * Prefetcher using the Delta Correlattion Prediction Table (DCPT) Algorith,
  * 
  */
-
+/*
+TODO: 
+    - Fix overflow handling
+    - Make sure delta entries in deque are in range
+    - Optimize
+*/
 #include "interface.hh"
 #include <algorithm>
 #include <iostream>
@@ -33,7 +38,7 @@ class Entry{
     deque <Delta> deltas; 
 };
 
-Entry::Entry(Addr pc) {
+Entry::Entry(Addr pc){ //constructor defenition
     pc = 0;
     lastAddr = 0;
     lastPrefetch = 0;
@@ -48,7 +53,7 @@ class Dcptable{
     int num_of_entries;
 };
 
-Dcptable::Dcptable(){
+Dcptable::Dcptable(){ //constructor defenition
     num_of_entries = 0;
 }
 
