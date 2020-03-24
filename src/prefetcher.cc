@@ -67,10 +67,10 @@ static void run_dcpt(AccessStat stat) {
         }
 
         // Add new delta
-        entry->last_address = stat.mem_addr;
         // TODO delta is n-bit, set to zero if overflow
         Delta delta = stat.mem_addr - entry->last_address;
         entry->deltas.push_back(delta);
+        entry->last_address = stat.mem_addr;
 
         // Run delta correlation, prefetch filter and issue prefetches
         std::list<Addr> *candidates = run_delta_correlation(entry);
@@ -100,7 +100,8 @@ static std::list<Addr> *run_delta_correlation(Entry *entry) {
 
         // Try to find a match for the two last deltas
         // Start from the back, excluding the last delta
-        for (size_t i = delta_count - 3; i >= 0; i--) {
+        // Signed iteration variable to prevent underflow
+        for (int32_t i = delta_count - 3; i >= 0; i--) {
             Delta first_delta = entry->deltas[i];
             Delta second_delta = entry->deltas[i + 1];
 
