@@ -112,8 +112,6 @@ static std::list<Addr> *run_delta_correlation(Entry *entry) {
             Delta first_delta = entry->deltas[i];
             Delta second_delta = entry->deltas[i + 1];
 
-            // TODO Ignore overflows? Test.
-
             // Is this a pattern?
             if(first_delta == sec_last_delta && second_delta == last_delta){
                 // For each delta after the match, add a prefetch candidate
@@ -130,7 +128,6 @@ static std::list<Addr> *run_delta_correlation(Entry *entry) {
                     }
                     candidates->push_back(address);
                 }
-                // TODO Continue or break? Test? Depends on which end is traversed from too.
                 break;
             }
         }
@@ -148,7 +145,6 @@ static std::list<Addr> *run_prefetch_filter(Entry *entry, std::list<Addr> *candi
         BlockAddr block_address = address & block_address_mask;
 
         // Discard all up to this point if same as last prefetch
-        // FIXME Is this correct?
         if (address == entry->last_prefetch) {
             prefetches->clear();
         }
