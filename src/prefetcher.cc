@@ -18,13 +18,17 @@ static std::list<Addr> *run_delta_correlation(Entry *entry);
 static std::list<Addr> *run_prefetch_filter(Entry *entry, std::list<Addr> *candidates);
 
 // Globals
-static uint32_t block_address_mask;
+static uint64_t block_address_mask;
+static int64_t delta_min_value;
+static int64_t delta_max_value;
 static Table *table;
 static std::list<Addr> *uncompleted_prefetches;
 
 // Called when initializing the prefetcher
 void prefetch_init(void) {
     block_address_mask = ~((uint32_t) 0) << ((uint32_t) log2(BLOCK_SIZE));
+    delta_min_value = -(1 << (DELTA_WIDTH - 1));
+    delta_max_value = (1 << (DELTA_WIDTH - 1)) - 1;
     table  = new Table();
     uncompleted_prefetches = new std::list<Addr>();
     DPRINTF(HWPrefetch, "Initialized DCPT prefetcher.\n");
@@ -67,8 +71,11 @@ static void run_dcpt(AccessStat stat) {
         }
 
         // Add new delta
-        // TODO delta is n-bit, set to zero if overflow
         Delta delta = stat.mem_addr - entry->last_address;
+        // Check if underflow or overflow
+        if (delta < delta_min_value || delta > delta_max_value) {
+            delta = 0;
+        }
         entry->deltas.push_back(delta);
         entry->last_address = stat.mem_addr;
 
@@ -105,14 +112,26 @@ static std::list<Addr> *run_delta_correlation(Entry *entry) {
             Delta first_delta = entry->deltas[i];
             Delta second_delta = entry->deltas[i + 1];
 
+            // TODO Ignore overflows? Test.
+
             // Is this a pattern?
             if(first_delta == sec_last_delta && second_delta == last_delta){
                 // For each delta after the match, add a prefetch candidate
                 for (size_t j = i + 2; j < delta_count; j++){
+                    Delta delta = entry->deltas[j];
+                    // Ignore overflows
+                    if (delta == 0) {
+                        continue;
+                    }
                     address += entry->deltas[j];
+                    // Check that it's (still) within the memory size
+                    if (address > MAX_PHYS_MEM_ADDR) {
+                        break;
+                    }
                     candidates->push_back(address);
                 }
-            break;
+                // TODO Continue or break? Test? Depends on which end is traversed from too.
+                break;
             }
         }
     }
