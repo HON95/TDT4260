@@ -1,6 +1,14 @@
 # NTNU TDT4260 Prefetcher Exercise 2020V
 
-## Setup (Ubuntu Disco)
+An implementation of the Delta Correlattion Prediction Table (DCPT) cache prefetcher algorithm, using a modified M5 simulator and the CPU SPEC2000 benchmark suite.
+
+## Implementation Notes
+
+- Since this does not need to be performance-optimized or anything, we chose to use fragmented C++-style dynamic data structures of pointers instead of C-style arrays as circular buffers of data, for simplicity of implenentation's sake.
+
+## Setup
+
+### Installation (Ubuntu Disco)
 
 1. Download the modified M5 simulator and SPEC CPU200 benchmarks provided by the course admins (not redistributable).
 1. Install available dependencies: `apt install python-dev scons swig zlib1g-dev m4`
@@ -14,15 +22,15 @@
 1. Setup the simulator and tools: `/opt/prefetcher/bin/setup_prefetcher ./prefetcher`
 1. Try compiling and running it to see if it's set up correctly (see below).
 
+### Link the Modified Source
+
+1. Clone the repo or something.
+1. Backup the original source: `mv src old_src`
+1. Link the new source: `ln -s <repo>/src/ src/`
+
 ## Run
 
 - Build: `make compile`
 - Benchmark:
     - Run `make test` (takes a while).
     - See `stats.txt` for aggregated statistics.
-
-## Link the Modified Source
-
-1. Clone the repo or something.
-1. Backup the original source: `mv src old_src`
-1. Link the new source: `ln -s <repo>/src/ src/`

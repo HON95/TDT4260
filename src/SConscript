@@ -3,4 +3,5 @@
 # This tells SCons where to find the prefetcher file.
 
 Import('*')
+Source('table.cc')
 Source('prefetcher.cc')

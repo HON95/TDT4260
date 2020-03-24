@@ -1,170 +1,151 @@
-/*
- * Prefetcher using the Delta Correlattion Prediction Table (DCPT) Algorith,
- * 
- */
-/*
-TODO: 
-    - Fix overflow handling
-    - Make sure delta entries in deque are in range
-    - Optimize
-*/
-#include "interface.hh"
+// Prefetcher using the Delta Correlattion Prediction Table (DCPT) algorithm.
+
 #include <algorithm>
 #include <iostream>
+#include <list>
 #include <stack>
 #include <string>
 #include <sstream>
-#include <list>
+#include <math.h>
 
-using namespace std;
-typedef uint64_t Delta;
+#include "interface.hh"
+#include "prefetcher.hh"
+#include "table.hh"
 
-//Define:
-#define MAX_NUM_OF_ENTRIES 100
-#define MAX_DELTAS 6
+// Prototypes
+static void run_dcpt(AccessStat stat);
+static std::list<Addr> *run_delta_correlation(Entry *entry);
+static std::list<Addr> *run_prefetch_filter(Entry *entry, std::list<Addr> *candidates);
 
-//Declarations:
-std::list <Addr> prefetches;
-std::list <Addr> candidates;
-deque<Addr> inFlight;
+// Globals
+static uint32_t block_address_mask;
+static Table *table;
+static std::list<Addr> *uncompleted_prefetches;
 
-//This is the class that represents an enty in the DCPT table. All members are public.
-class Entry{
-    public:
-    Entry(Addr pc); //constructor
-    Addr pc;
-    Addr lastAddr;
-    Addr lastPrefetch;
-    deque <Delta> deltas; 
-};
-
-Entry::Entry(Addr pc){ //constructor defenition
-    pc = 0;
-    lastAddr = 0;
-    lastPrefetch = 0;
+// Called when initializing the prefetcher
+void prefetch_init(void) {
+    block_address_mask = ~((uint32_t) 0) << ((uint32_t) log2(BLOCK_SIZE));
+    table  = new Table();
+    uncompleted_prefetches = new std::list<Addr>();
+    DPRINTF(HWPrefetch, "Initialized DCPT prefetcher.\n");
 }
 
-//This calss is the table that holds all the table entries of the DCPT. All members are public
-class Dcptable{
-    public:
-    Dcptable(); //constructor
-    Entry *find_entry(Addr pc);
-    list<Entry *> entries;
-    int num_of_entries;
-};
-
-Dcptable::Dcptable(){ //constructor defenition
-    num_of_entries = 0;
+// Called on cache access
+void prefetch_access(AccessStat stat) {
+    run_dcpt(stat);
 }
 
-static Dcptable *table; //allocate static memory for the table 
-
-void prefetch_init(void){
-    /* Called before any calls to prefetch_access. */
-    /* This is the place to initialize data structures. */
-    table  = new Dcptable;
-    DPRINTF(HWPrefetch, "Initialized sequential-on-access prefetcher\n");
-}
-
-//Function to find an entry in the table from a search with PC
-Entry *Dcptable::find_entry(Addr pc){
-    for (std::list<Entry *>::iterator it = entries.begin(); it != entries.end(); it++){
-        Entry *temp = *it; //convert type
-        if(pc == temp->pc){
-            return temp;
-        }
-    }
-return NULL; //If no entry is found with the current PC
-}
-
-void DeltaCorrelation(Entry *entry){ //From paper on DCPT
-    candidates.clear();
-    deque<Delta>::iterator del_it = entry->deltas.end(); //Create an delta iterator at the end of the delta deque
-    del_it -= 1; //push it back to the last entry
-    Delta last_delta = *del_it; 
-    del_it -= 1; //push it back ti the second to last entry
-    Delta sec_last_delta = *del_it;
-    Addr address = entry->lastAddr; 
-    del_it = entry->deltas.begin();
-    
-    while(del_it != entry->deltas.end()){
-        Delta temp1 = *del_it;
-        del_it++;
-        Delta temp2 = *del_it;
-        
-        if((temp1 == sec_last_delta) && (temp2 == last_delta)){ //If a pattern is recognized
-            
-            for(del_it++; del_it != entry->deltas.end(); ++del_it){ //for each remaining delta
-                address += *del_it * BLOCK_SIZE;
-                candidates.push_back(address);
-            }
-        }
-    }
-}
-
-void PrefetchFilter(Entry *entry){ //From paper on DCPT
-    prefetches.clear();
-    list<Addr>::iterator cand_it; //Make a candidate iterator
-
-    for(cand_it = candidates.begin(); cand_it != candidates.end(); cand_it++){
-        // See if candidate is in inFlight or MSHR or cache
-        if(std::find(inFlight.begin(), inFlight.end(), *cand_it) == inFlight.end() && !in_mshr_queue(*cand_it) && !in_cache(*cand_it)){
-            prefetches.push_back(*cand_it);
-            
-            if(inFlight.size() == 32){ //number of inFlight emelents
-                inFlight.pop_front();
-            }
-
-            inFlight.push_back(*cand_it); 
-            entry->lastPrefetch = *cand_it;
-        }
-    }
-}
-
-void prefetch_access(AccessStat stat){ 
-    //Try to implement Algorithm 1, Main flow from "Storage Efficient Hardware
-    //Prefetching using Delta-Correlating Prediction Tables" ("DCPT paper")
-    Entry *curr_e = table->find_entry(stat.pc); //See if the PC corresponds to an existing entry
-
-    if (curr_e == NULL){  //make new entry 
-        if (table->num_of_entries >= MAX_NUM_OF_ENTRIES){
-            table->entries.pop_back(); //remove oldeset entry
-        }
-
-        Entry *new_e = new Entry(stat.pc); //create new entry
-        new_e->pc = stat.pc;
-        new_e->lastAddr = stat.mem_addr;
-        new_e->lastPrefetch = 0;
-        new_e->deltas.push_front(1);//insert new element
-        table->entries.push_front(new_e);
-        curr_e = new_e;
-
-        if(table->num_of_entries < MAX_NUM_OF_ENTRIES){
-            ++table->num_of_entries; //update number of entries
-        }
-            cout << "Number of entries is: " << table->num_of_entries<<endl;
-    }
-    else if((stat.mem_addr - curr_e->lastAddr) != 0){ //If the addresses are not the same
-       Delta curr_delta = (stat.mem_addr - curr_e->lastAddr);
-       if(curr_e->deltas.size() == MAX_DELTAS){
-            curr_e->deltas.pop_front();
-       }
-       curr_e->deltas.push_back(curr_delta); 
-        //update the delta deque entry for the current entry to have the new delta value.
-       curr_e->lastAddr = stat.mem_addr; //update last address
-    }
-
-    DeltaCorrelation(curr_e);
-    PrefetchFilter(curr_e);
-    
-    for(list<Addr>::iterator pre_it = prefetches.begin(); pre_it !=prefetches.end(); pre_it++){ 
-        // Do the actual prefetching for all addresses found by the DCPT and prefetch filter. 
-        issue_prefetch(*pre_it);
-    }
-}
-
+// Called after a prefetch is completed
 void prefetch_complete(Addr addr) {
-    /*
-     * Called when a block requested by the prefetcher has been loaded.
-     */
+    uncompleted_prefetches->remove(addr);
+}
+
+static void run_dcpt(AccessStat stat) {
+    // Nullable
+    Entry *entry = table->find_entry(stat.pc);
+
+    // Not found, create new
+    if (entry == NULL){
+        // Make space by removing oldest entry
+        if (table->entries.size() >= TABLE_SIZE) {
+            delete table->entries.back();
+            table->entries.pop_back();
+        }
+
+        // Add new entry
+        Entry *new_entry = new Entry();
+        new_entry->pc = stat.pc;
+        new_entry->last_address = stat.mem_addr;
+        table->entries.push_front(new_entry);
+    }
+
+    // Found with different access address (non-zero delta)
+    else if (stat.mem_addr != entry->last_address) {
+        // Make space by removing oldest delta
+        if (entry->deltas.size() == DELTA_COUNT){
+            entry->deltas.pop_front();
+        }
+
+        // Add new delta
+        entry->last_address = stat.mem_addr;
+        // TODO delta is n-bit, set to zero if overflow
+        Delta delta = stat.mem_addr - entry->last_address;
+        entry->deltas.push_back(delta);
+
+        // Run delta correlation, prefetch filter and issue prefetches
+        std::list<Addr> *candidates = run_delta_correlation(entry);
+        std::list<Addr> *prefetches = run_prefetch_filter(entry, candidates);
+        for(std::list<Addr>::iterator iter = prefetches->begin(); iter != prefetches->end(); iter++){
+            // Check if prefetch queue is full
+            if (current_queue_size() == MAX_QUEUE_SIZE) {
+                break;
+            }
+            issue_prefetch(*iter);
+        }
+        delete candidates;
+        delete prefetches;
+    }
+}
+
+// Based on the Delta Correlation algorithm in the paper
+static std::list<Addr> *run_delta_correlation(Entry *entry) {
+    std::list<Addr> *candidates = new std::list<Addr>();
+    size_t const delta_count = entry->deltas.size();
+
+    // At least three deltas are required to find a pattern
+    if (delta_count >= 3) {
+        Delta last_delta = entry->deltas[delta_count - 1];
+        Delta sec_last_delta = entry->deltas[delta_count - 2];
+        Addr address = entry->last_address;
+
+        // Try to find a match for the two last deltas
+        // Start from the back, excluding the last delta
+        for (size_t i = delta_count - 3; i >= 0; i--) {
+            Delta first_delta = entry->deltas[i];
+            Delta second_delta = entry->deltas[i + 1];
+
+            // Is this a pattern?
+            if(first_delta == sec_last_delta && second_delta == last_delta){
+                // For each delta after the match, add a prefetch candidate
+                for (size_t j = i + 2; j < delta_count; j++){
+                    address += entry->deltas[j];
+                    candidates->push_back(address);
+                }
+            break;
+            }
+        }
+    }
+
+    return candidates;
+}
+
+// Based on the Prefetch Filter algorithm in the paper
+static std::list<Addr> *run_prefetch_filter(Entry *entry, std::list<Addr> *candidates) {
+    std::list<Addr> *prefetches = new std::list<Addr>();
+
+    for(std::list<Addr>::iterator cand_iter = candidates->begin(); cand_iter != candidates->end(); cand_iter++){
+        Addr address = *cand_iter;
+        BlockAddr block_address = address & block_address_mask;
+
+        // Discard all up to this point if same as last prefetch
+        // FIXME Is this correct?
+        if (address == entry->last_prefetch) {
+            prefetches->clear();
+        }
+
+        // Add prefetch if not in flight, MSHR queue or cache
+        bool is_uncompleted = std::find(uncompleted_prefetches->begin(), uncompleted_prefetches->end(), block_address) != uncompleted_prefetches->end();
+        if (!is_uncompleted && !in_mshr_queue(block_address) && !in_cache(block_address)) {
+            // Make space by removing oldest prefetch
+            if (uncompleted_prefetches->size() == MAX_UNCOMPLETED_PREFETCH) {
+                uncompleted_prefetches->pop_front();
+            }
+
+            prefetches->push_back(block_address);
+            uncompleted_prefetches->push_back(block_address);
+            entry->last_prefetch = address;
+        }
+    }
+
+    return prefetches;
 }
